@@ -1,3 +1,9 @@
+EFS_GROUP_ID = 'sg-331a744e'# id of EFS security group to enable mounting
+AMI_ID = 'ami-6e1a0117'     # region-specific (Oregon) Ubuntu 16.04
+KEYPAIR_NAME = 'yaroslav'   # enables ssh with my .pem file
+INSTANCE_TYPE = 'p2.xlarge' # each distributed run is optimized for specific
+                            # instance type
+
 try:
     import boto3
 except BaseException:
@@ -8,6 +14,7 @@ import logging
 import os
 import base64
 import requests
+from pprint import pprint
 import json
 import six
 
@@ -89,8 +96,11 @@ class EC2WorkerManager(object):
             self.logger.warn('User startup script argument is deprecated')
 
     def _get_image_id(self):
-        # return 'ami-cd0f5cb6' # vanilla ubuntu 16.04 image
-        return 'ami-eb7d9491'  # studio.ml gpu image
+        #    return 'ami-cd0f5cb6' # vanilla ubuntu 16.04 image
+        #        return 'ami-eb7d9491'  # studio.ml gpu image
+        return AMI_ID
+
+    
 
     def _get_block_device_mappings(self, resources_needed):
         return [{
@@ -115,11 +125,15 @@ class EC2WorkerManager(object):
 
         name = self._generate_instance_name()
 
-        instance_type = self._select_instance_type(resources_needed)
+        if INSTANCE_TYPE:
+          instance_type = INSTANCE_TYPE
+        else:
+          instance_type = self._select_instance_type(resources_needed)
 
         startup_script = self._get_startup_script(
             resources_needed, queue_name, timeout=timeout)
-
+        print(instance_type)
+        ssh_keypair = KEYPAIR_NAME
         if ssh_keypair is not None:
             groupid = self._create_security_group(ssh_keypair)
 
@@ -149,8 +163,9 @@ class EC2WorkerManager(object):
         }
         if ssh_keypair:
             kwargs['KeyName'] = ssh_keypair
-            kwargs['SecurityGroupIds'] = [groupid]
+            kwargs['SecurityGroupIds'] = [groupid, EFS_GROUP_ID]
 
+        pprint(kwargs)
         response = self.client.run_instances(**kwargs)
         self.logger.info(
             'Starting instance {}'.format(
@@ -212,7 +227,9 @@ class EC2WorkerManager(object):
             aws_secret_key=self.client._request_signer._credentials.secret_key,
             autoscaling_group=autoscaling_group if autoscaling_group else "",
             region=self.region,
-            use_gpus=0 if resources_needed['gpus'] == 0 else 1,
+
+            # hardwire to always setup GPU env
+            use_gpus=1 if resources_needed['gpus'] == 0 else 1,
             timeout=timeout,
             studioml_branch=self.branch)
 
@@ -242,7 +259,19 @@ class EC2WorkerManager(object):
             IpPermissions=[{
                 'IpProtocol': 'tcp',
                 'FromPort': 22,
-                'ToPort': 22,
+                'ToPort': 65000,
+                'IpRanges': [{
+                    'CidrIp': '0.0.0.0/0'
+                }]
+            }]
+        )
+        response = self.client.authorize_security_group_ingress(
+            GroupId=groupid,
+            GroupName=group_name,
+            IpPermissions=[{
+                'IpProtocol': 'udp',
+                'FromPort': 22,
+                'ToPort': 65000,
                 'IpRanges': [{
                     'CidrIp': '0.0.0.0/0'
                 }]

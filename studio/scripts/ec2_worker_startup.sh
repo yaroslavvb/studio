@@ -1,5 +1,7 @@
 #!/bin/bash
 
+export BUCKET=distributed-logs
+
 exec > >(tee -i ~/ec2_worker_logfile.txt)
 exec 2>&1
 
@@ -52,7 +54,7 @@ if [ ! -d "studio" ]; then
         wget $cuda_base/$cuda_ver
         sudo dpkg -i $cuda_ver
         sudo apt -y update
-        sudo apt install -y cuda
+        sudo apt install -y "cuda-8.0"
 
         # install cudnn
         wget $code_url_base/$cudnn5
@@ -79,7 +81,7 @@ studio remote worker --queue=$queue_name  --verbose=debug --timeout={timeout}
 echo "Work done"
 
 hostname=$(hostname)
-aws s3 cp /var/log/cloud-init-output.log "s3://studioml-logs/$queue_name/$hostname.txt"
+aws s3 cp /var/log/cloud-init-output.log "s3://$BUCKET/$queue_name/$hostname.txt"
 
 if [[ -n $(who) ]]; then
     echo "Users are logged in, not shutting down"
@@ -116,6 +118,7 @@ if [ -n $autoscaling_group ]; then
     #
 
 fi
-aws s3 cp /var/log/cloud-init-output.log "s3://studioml-logs/$queue_name/$hostname.txt"
-echo "Shutting the instance down!"
-sudo shutdown now
+aws s3 cp /var/log/cloud-init-output.log "s3://$BUCKET/$queue_name/$hostname.txt"
+# do not shut down the instance
+# echo "Shutting the instance down!"
+# sudo shutdown now
